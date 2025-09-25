@@ -1,0 +1,35 @@
+name: Extract WebKit Diff
+
+on:
+  workflow_dispatch:   # تشغيل يدوي مع إدخال قيم
+    inputs:
+      old_ref:
+        description: "النسخة القديمة (فرع أو tag أو commit)"
+        required: true
+        default: "webkit-gtk-2.42.0"
+      new_ref:
+        description: "النسخة الجديدة (فرع أو tag أو commit)"
+        required: true
+        default: "webkit-gtk-2.44.0"
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone WebKit
+        run: |
+          git clone https://github.com/WebKit/WebKit.git
+          cd WebKit
+          git fetch --all --tags
+
+      - name: Generate diff
+        run: |
+          cd WebKit
+          git diff ${{ github.event.inputs.old_ref }} ${{ github.event.inputs.new_ref }} > ../webkit-diff.patch
+
+      - name: Upload diff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webkit-diff
+          path: webkit-diff.patch
