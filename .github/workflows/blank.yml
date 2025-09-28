@@ -23,7 +23,7 @@ jobs:
           git fetch origin +refs/heads/${{ github.event.inputs.from_branch }}:refs/remotes/origin/${{ github.event.inputs.from_branch }}
           git fetch origin +refs/heads/${{ github.event.inputs.to_branch }}:refs/remotes/origin/${{ github.event.inputs.to_branch }}
 
-      - name: Generate Diff + Commits (with classification + stats)
+      - name: Generate Diff + Commits (classified + suspicious markers)
         run: |
           cd webkit
 
@@ -31,24 +31,41 @@ jobs:
           git log origin/${{ github.event.inputs.from_branch }}..origin/${{ github.event.inputs.to_branch }} \
             --pretty=format:'%H|%h|%s' > ../commits_raw.txt
 
-          # counters
-          sec_count=0
-          perf_count=0
-          ref_count=0
-          total=0
+          sec_count=0; perf_count=0; ref_count=0; total=0
 
           {
             echo "<html><head><style>"
-            echo "body { font-family: monospace; background: #fafafa; }"
-            echo "li { margin: 4px 0; }"
-            echo ".security { color: red; font-weight: bold; }"
-            echo ".perf { color: green; font-weight: bold; }"
-            echo ".refactor { color: blue; font-weight: bold; }"
+            echo "body { font-family: Arial, sans-serif; background: #f4f6f8; padding: 30px; color: #333; }"
+            echo "h1 { background: #2d3748; color: white; padding: 12px; border-radius: 8px; }"
+            echo "nav { margin: 20px 0; }"
+            echo "nav a { margin-right: 15px; text-decoration: none; color: #2d3748; font-weight: bold; }"
+            echo "nav a:hover { text-decoration: underline; }"
+            echo "h2 { margin-top: 30px; border-bottom: 2px solid #ddd; padding-bottom: 6px; color: #2d3748; }"
+            echo "ul { list-style: none; padding: 0; }"
+            echo "li { margin: 8px 0; padding: 6px; border-radius: 6px; }"
+            echo "li a { text-decoration: none; color: inherit; }"
+            echo ".security { background: #ffe5e5; border-left: 4px solid red; }"
+            echo ".perf { background: #e5ffe5; border-left: 4px solid green; }"
+            echo ".refactor { background: #e5f0ff; border-left: 4px solid blue; }"
+            echo ".other { background: #f1f1f1; border-left: 4px solid gray; }"
+            echo ".danger { background: #fff3cd; font-weight: bold; color: #b45309; display: block; }"
+            echo "pre { background: #1e293b; color: #e2e8f0; padding: 15px; border-radius: 8px; overflow-x: auto; }"
+            echo ".back { margin-top: 15px; display: inline-block; background: #2d3748; color: white; padding: 6px 12px; border-radius: 6px; text-decoration: none; }"
+            echo ".back:hover { background: #4a5568; }"
             echo "</style></head><body>"
-            echo "<h2>Commits between ${{ github.event.inputs.from_branch }} and ${{ github.event.inputs.to_branch }}</h2>"
 
-            # loop لتصنيف commits
-            echo "<ul>"
+            echo "<h1 id=\"top\">WebKit Branch Diff Report</h1>"
+            echo "<p>From <b>${{ github.event.inputs.from_branch }}</b> → To <b>${{ github.event.inputs.to_branch }}</b></p>"
+
+            # navigation links
+            echo "<nav>"
+            echo "<a href=\"#commits\">Commits</a>"
+            echo "<a href=\"#summary\">Summary</a>"
+            echo "<a href=\"#diff\">Diff</a>"
+            echo "</nav>"
+
+            # commits list
+            echo "<h2 id=\"commits\">Commits</h2><ul>"
             while IFS="|" read -r full short msg; do
               class="other"
               lower=$(echo "$msg" | tr '[:upper:]' '[:lower:]')
@@ -60,30 +77,44 @@ jobs:
                 class="refactor"; ref_count=$((ref_count+1))
               fi
               total=$((total+1))
-              echo "<li class=\"$class\"><a href=\"https://github.com/WebKit/WebKit/commit/$full\" target=\"_blank\">$short - $msg</a></li>"
+              echo "<li class=\"$class\">🔗 <a href=\"https://github.com/WebKit/WebKit/commit/$full\" target=\"_blank\">$short</a> — $msg</li>"
             done < ../commits_raw.txt
             echo "</ul>"
+            echo "<a href=\"#top\" class=\"back\">⬆ Back to Top</a>"
 
-            # إظهار ملخص
-            echo "<h2>Summary</h2>"
-            echo "<p>🔴 Security related: $sec_count</p>"
-            echo "<p>🟢 Performance related: $perf_count</p>"
-            echo "<p>🔵 Refactors: $ref_count</p>"
-            echo "<p>📦 Total commits: $total</p>"
+            # summary
+            echo "<h2 id=\"summary\">Summary</h2>"
+            echo "<ul>"
+            echo "<li>🔴 Security related: $sec_count</li>"
+            echo "<li>🟢 Performance: $perf_count</li>"
+            echo "<li>🔵 Refactors: $ref_count</li>"
+            echo "<li>📦 Total commits: $total</li>"
+            echo "</ul>"
+            echo "<a href=\"#top\" class=\"back\">⬆ Back to Top</a>"
 
-            # عرض diff
-            echo "<h2>Diff</h2><pre>"
+            # diff analysis
+            echo "<h2 id=\"diff\">Diff Analysis</h2><pre>"
+
             git diff origin/${{ github.event.inputs.from_branch }}..origin/${{ github.event.inputs.to_branch }} \
               -- Source/JavaScriptCore \
                  Source/WebCore \
-                 Source/WebKit \
-              | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
-            echo "</pre></body></html>"
+                 Source/WebKit | \
+              sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' | \
+              while read -r line; do
+                if echo "$line" | grep -qE 'memcpy|memmove|strcpy|strcat|malloc|free|new|delete'; then
+                  echo "<span class=\"danger\">⚠️ $line</span>"
+                else
+                  echo "$line"
+                fi
+              done
+
+            echo "</pre>"
+            echo "<a href=\"#top\" class=\"back\">⬆ Back to Top</a>"
+            echo "</body></html>"
           } > ../filtered_diff.html
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: webkit-diff
-          path: |
-            filtered_diff.html
+          path: filtered_diff.html
