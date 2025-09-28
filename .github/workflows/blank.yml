@@ -1,35 +1,41 @@
-name: Extract WebKit Diff
+name: Diff WebKit Branches
 
 on:
-  workflow_dispatch:   # تشغيل يدوي مع إدخال قيم
+  workflow_dispatch:
     inputs:
-      old_ref:
-        description: "النسخة القديمة (فرع أو tag أو commit)"
+      from_branch:
+        description: "Branch to diff from (e.g. safari-613-branch)"
         required: true
-        default: "webkit-gtk-2.42.0"
-      new_ref:
-        description: "النسخة الجديدة (فرع أو tag أو commit)"
+        default: "safari-613-branch"
+      to_branch:
+        description: "Branch to diff to (e.g. safari-614-branch)"
         required: true
-        default: "webkit-gtk-2.44.0"
+        default: "safari-614-branch"
 
 jobs:
   diff:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Clone WebKit
+      - name: Clone WebKit repository
         run: |
-          git clone https://github.com/WebKit/WebKit.git
-          cd WebKit
-          git fetch --all --tags
+          git clone https://github.com/WebKit/WebKit.git webkit
+          cd webkit
+          git fetch origin +refs/heads/${{ github.event.inputs.from_branch }}:refs/remotes/origin/${{ github.event.inputs.from_branch }}
+          git fetch origin +refs/heads/${{ github.event.inputs.to_branch }}:refs/remotes/origin/${{ github.event.inputs.to_branch }}
 
-      - name: Generate diff
+      - name: Generate Filtered Diff
         run: |
-          cd WebKit
-          git diff ${{ github.event.inputs.old_ref }} ${{ github.event.inputs.new_ref }} > ../webkit-diff.patch
+          cd webkit
+          git diff origin/${{ github.event.inputs.from_branch }}..origin/${{ github.event.inputs.to_branch }} \
+            -- Source/JavaScriptCore \
+               Source/WebCore \
+               Source/WebKit \
+          > ../filtered_diff.patch
 
-      - name: Upload diff artifact
+          echo "✅ Diff saved to filtered_diff.patch"
+
+      - name: Upload Diff Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: webkit-diff
-          path: webkit-diff.patch
+          name: filtered-diff
+          path: filtered_diff.patch
