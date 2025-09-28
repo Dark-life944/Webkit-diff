@@ -1,35 +1,89 @@
-name: Extract WebKit Diff
+name: Diff WebKit Branches
 
 on:
-  workflow_dispatch:   # تشغيل يدوي مع إدخال قيم
+  workflow_dispatch:
     inputs:
-      old_ref:
-        description: "النسخة القديمة (فرع أو tag أو commit)"
+      from_branch:
+        description: "Branch to diff from (e.g. safari-613-branch)"
         required: true
-        default: "webkit-gtk-2.42.0"
-      new_ref:
-        description: "النسخة الجديدة (فرع أو tag أو commit)"
+        default: "safari-613-branch"
+      to_branch:
+        description: "Branch to diff to (e.g. safari-614-branch)"
         required: true
-        default: "webkit-gtk-2.44.0"
+        default: "safari-614-branch"
 
 jobs:
   diff:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Clone WebKit
+      - name: Clone WebKit repository
         run: |
-          git clone https://github.com/WebKit/WebKit.git
-          cd WebKit
-          git fetch --all --tags
+          git clone https://github.com/WebKit/WebKit.git webkit
+          cd webkit
+          git fetch origin +refs/heads/${{ github.event.inputs.from_branch }}:refs/remotes/origin/${{ github.event.inputs.from_branch }}
+          git fetch origin +refs/heads/${{ github.event.inputs.to_branch }}:refs/remotes/origin/${{ github.event.inputs.to_branch }}
 
-      - name: Generate diff
+      - name: Generate Diff + Commits (with classification + stats)
         run: |
-          cd WebKit
-          git diff ${{ github.event.inputs.old_ref }} ${{ github.event.inputs.new_ref }} > ../webkit-diff.patch
+          cd webkit
 
-      - name: Upload diff artifact
+          # استخراج commits
+          git log origin/${{ github.event.inputs.from_branch }}..origin/${{ github.event.inputs.to_branch }} \
+            --pretty=format:'%H|%h|%s' > ../commits_raw.txt
+
+          # counters
+          sec_count=0
+          perf_count=0
+          ref_count=0
+          total=0
+
+          {
+            echo "<html><head><style>"
+            echo "body { font-family: monospace; background: #fafafa; }"
+            echo "li { margin: 4px 0; }"
+            echo ".security { color: red; font-weight: bold; }"
+            echo ".perf { color: green; font-weight: bold; }"
+            echo ".refactor { color: blue; font-weight: bold; }"
+            echo "</style></head><body>"
+            echo "<h2>Commits between ${{ github.event.inputs.from_branch }} and ${{ github.event.inputs.to_branch }}</h2>"
+
+            # loop لتصنيف commits
+            echo "<ul>"
+            while IFS="|" read -r full short msg; do
+              class="other"
+              lower=$(echo "$msg" | tr '[:upper:]' '[:lower:]')
+              if echo "$lower" | grep -E -q 'overflow|buffer|use-after-free|memory|sanitize|security'; then
+                class="security"; sec_count=$((sec_count+1))
+              elif echo "$lower" | grep -E -q 'perf|optimi|speed|fast|cache'; then
+                class="perf"; perf_count=$((perf_count+1))
+              elif echo "$lower" | grep -E -q 'refactor|cleanup|rename|style'; then
+                class="refactor"; ref_count=$((ref_count+1))
+              fi
+              total=$((total+1))
+              echo "<li class=\"$class\"><a href=\"https://github.com/WebKit/WebKit/commit/$full\" target=\"_blank\">$short - $msg</a></li>"
+            done < ../commits_raw.txt
+            echo "</ul>"
+
+            # إظهار ملخص
+            echo "<h2>Summary</h2>"
+            echo "<p>🔴 Security related: $sec_count</p>"
+            echo "<p>🟢 Performance related: $perf_count</p>"
+            echo "<p>🔵 Refactors: $ref_count</p>"
+            echo "<p>📦 Total commits: $total</p>"
+
+            # عرض diff
+            echo "<h2>Diff</h2><pre>"
+            git diff origin/${{ github.event.inputs.from_branch }}..origin/${{ github.event.inputs.to_branch }} \
+              -- Source/JavaScriptCore \
+                 Source/WebCore \
+                 Source/WebKit \
+              | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+            echo "</pre></body></html>"
+          } > ../filtered_diff.html
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: webkit-diff
-          path: webkit-diff.patch
+          path: |
+            filtered_diff.html
